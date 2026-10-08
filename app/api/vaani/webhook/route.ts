@@ -30,9 +30,11 @@ export async function POST(req: NextRequest) {
   const eventType = typeof obj.event === 'string' ? obj.event : typeof obj.type === 'string' ? obj.type : null;
 
   const headers: Record<string, string> = {};
-  req.headers.forEach((v, k) => {
-    if (!['authorization', 'cookie'].includes(k)) headers[k] = v;
-  });
+  // Keep only harmless headers; Vercel injects credential-like ones (e.g. x-vercel-oidc-token).
+  for (const k of ['content-type', 'user-agent', 'x-forwarded-for']) {
+    const v = req.headers.get(k);
+    if (v) headers[k] = v;
+  }
 
   const { error } = await supabaseAdmin()
     .from('webhook_events')
