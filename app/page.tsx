@@ -396,7 +396,7 @@ export default function CallConsolePage() {
   return (
     <div className="flex h-screen flex-col bg-stone-50 text-slate-800 md:flex-row">
       {/* ------------------------- Sidebar ------------------------- */}
-      <aside className="flex max-h-[45vh] w-full shrink-0 flex-col border-b border-stone-200 bg-white md:max-h-none md:w-[360px] md:border-b-0 md:border-r">
+      <aside className="flex max-h-[45vh] w-full shrink-0 flex-col overflow-y-auto border-b border-stone-200 bg-white md:max-h-none md:w-[360px] md:border-b-0 md:border-r">
         <div className="border-b border-stone-200 px-4 pb-3 pt-4">
           <div className="mb-3 flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-900 text-amber-300">
@@ -437,7 +437,7 @@ export default function CallConsolePage() {
           </div>
         </div>
 
-        <ul className="min-h-0 flex-1 divide-y divide-stone-100 overflow-y-auto">
+        <ul className="min-h-[240px] flex-1 divide-y divide-stone-100 overflow-y-auto">
           {visibleCalls.length === 0 && (
             <li className="px-4 py-10 text-center text-sm text-stone-500">No calls match this filter.</li>
           )}
@@ -495,7 +495,7 @@ export default function CallConsolePage() {
               <iframe
                 title="Google Calendar"
                 src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(LEAD_DESIGNER.email)}&mode=MONTH&ctz=Asia%2FKolkata&showTitle=0&showPrint=0&showTz=0&showCalendars=0&showNav=1&showTabs=0`}
-                className="h-[300px] w-full rounded-lg border border-stone-200"
+                className="h-[280px] w-full rounded-lg border border-stone-200"
               />
               <p className="px-2 pt-1.5 text-[11px] leading-snug text-stone-500">
                 Blank? Sign in to Google as {LEAD_DESIGNER.email} in this browser, or{' '}
