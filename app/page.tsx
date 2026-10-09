@@ -5,7 +5,7 @@ import {
   Phone, Search, Moon, Play, Pause, Clock, MapPin, Home, Ruler, IndianRupee,
   CalendarClock, ShieldCheck, Sparkles, LayoutDashboard, Database, Mail,
   CalendarCheck, CheckCircle2, CircleDashed, MinusCircle, UserCheck, Bot, User,
-  AlertTriangle, CalendarDays,
+  AlertTriangle, CalendarDays, ChevronDown,
 } from 'lucide-react';
 
 /* ----------------------------- Types ----------------------------- */
@@ -329,7 +329,7 @@ export default function CallConsolePage() {
   const [query, setQuery] = useState('');
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
-  const [showCalendar, setShowCalendar] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(true);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   const selected = calls.find((c) => c.id === selectedId) ?? calls[0];
@@ -437,7 +437,7 @@ export default function CallConsolePage() {
           </div>
         </div>
 
-        <ul className="flex-1 divide-y divide-stone-100 overflow-y-auto">
+        <ul className="min-h-0 flex-1 divide-y divide-stone-100 overflow-y-auto">
           {visibleCalls.length === 0 && (
             <li className="px-4 py-10 text-center text-sm text-stone-500">No calls match this filter.</li>
           )}
@@ -477,6 +477,41 @@ export default function CallConsolePage() {
         <div className="border-t border-stone-200 px-4 py-2.5 text-xs text-stone-500">
           {calls.filter((c) => isAfterHours(c.receivedAt)).length} of {calls.length} calls arrived after hours
         </div>
+
+        <div className="hidden shrink-0 border-t border-stone-200 md:block">
+          <button
+            onClick={() => setShowCalendar((v) => !v)}
+            aria-expanded={showCalendar}
+            className="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-semibold text-slate-900 hover:bg-stone-50"
+          >
+            <span className="inline-flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-amber-700" />
+              {LEAD_DESIGNER.name}'s calendar
+            </span>
+            <ChevronDown className={`h-4 w-4 text-stone-400 transition ${showCalendar ? '' : '-rotate-90'}`} />
+          </button>
+          {showCalendar && (
+            <div className="px-2 pb-2">
+              <iframe
+                title="Google Calendar"
+                src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(LEAD_DESIGNER.email)}&mode=MONTH&ctz=Asia%2FKolkata&showTitle=0&showPrint=0&showTz=0&showCalendars=0&showNav=1&showTabs=0`}
+                className="h-[300px] w-full rounded-lg border border-stone-200"
+              />
+              <p className="px-2 pt-1.5 text-[11px] leading-snug text-stone-500">
+                Blank? Sign in to Google as {LEAD_DESIGNER.email} in this browser, or{' '}
+                <a
+                  href={`https://calendar.google.com/calendar/u/0/r/month?authuser=${encodeURIComponent(LEAD_DESIGNER.email)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-amber-700 underline"
+                >
+                  open it in Google Calendar
+                </a>
+                .
+              </p>
+            </div>
+          )}
+        </div>
       </aside>
 
       {/* --------------------------- Main -------------------------- */}
@@ -509,31 +544,7 @@ export default function CallConsolePage() {
                 {selected.assigned && <div className="text-xs text-stone-500">{LEAD_DESIGNER.role}</div>}
               </div>
             </div>
-            <button
-              onClick={() => setShowCalendar((v) => !v)}
-              aria-expanded={showCalendar}
-              className={`inline-flex items-center gap-2 rounded-xl border px-3.5 py-2.5 text-sm font-medium transition ${
-                showCalendar ? 'border-slate-900 bg-slate-900 text-amber-100' : 'border-stone-200 bg-white text-slate-700 hover:border-amber-400'
-              }`}
-            >
-              <CalendarDays className="h-4 w-4" />
-              {showCalendar ? 'Hide calendar' : 'Calendar'}
-            </button>
           </header>
-
-          {showCalendar && (
-            <section className="mt-5 rounded-2xl border border-stone-200 bg-white p-3">
-              <div className="mb-2 flex items-center justify-between px-1">
-                <h3 className="text-sm font-semibold text-slate-900">{LEAD_DESIGNER.name}'s calendar</h3>
-                <span className="text-xs text-stone-500">Read-only · month view</span>
-              </div>
-              <iframe
-                title="Google Calendar"
-                src={`https://calendar.google.com/calendar/embed?src=${encodeURIComponent(LEAD_DESIGNER.email)}&mode=MONTH&ctz=Asia%2FKolkata&showTitle=0&showPrint=0&showTz=0&showCalendars=0`}
-                className="h-[420px] w-full rounded-lg border-0"
-              />
-            </section>
-          )}
 
           {/* Audio player */}
           <section className="mt-5 rounded-2xl bg-slate-900 p-4 text-slate-100 shadow-sm">
