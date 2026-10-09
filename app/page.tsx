@@ -5,8 +5,7 @@ import {
   Phone, Search, Moon, Play, Pause, Clock, MapPin, Home, Ruler, IndianRupee,
   CalendarClock, ShieldCheck, Sparkles, LayoutDashboard, Database, Mail,
   CalendarCheck, CheckCircle2, CircleDashed, MinusCircle, UserCheck, Bot, User,
-  AlertTriangle, ExternalLink, MessageCircle, MessageSquare, FileText, RotateCcw,
-  ArrowUpCircle, Timer, PhoneCall, MapPinned, X,
+  AlertTriangle,
 } from 'lucide-react';
 
 /* ----------------------------- Types ----------------------------- */
@@ -15,8 +14,6 @@ type Qualification = 'Qualified' | 'Nurture' | 'Out of Scope';
 type FilterTab = 'all' | 'qualified' | 'after-hours';
 type OutputStatus = 'delivered' | 'scheduled' | 'skipped';
 type OutputKey = 'dashboard' | 'hubspot' | 'email' | 'calendar';
-type FollowUpStatus = 'call-due' | 'first-touch' | 'site-visit';
-type Channel = 'WhatsApp' | 'SMS';
 
 interface TranscriptItem {
   id: string;
@@ -46,21 +43,6 @@ interface HubspotPush {
   margin: string;
 }
 
-interface LookbookDispatch {
-  channel: Channel;
-  sentAt: string;
-}
-
-/** Snapshot taken before a manual override so the front desk can revert it. */
-interface PreOverride {
-  qualification: Qualification;
-  outputs: Record<OutputKey, OutputResult>;
-  hubspot?: HubspotPush;
-  calendarSlot?: string;
-  assigned: boolean;
-  followUp: FollowUpStatus | null;
-}
-
 interface CallLead {
   id: string;
   callerName: string;
@@ -73,10 +55,6 @@ interface CallLead {
   cutApplied: boolean;
   cutNote?: string;
   assigned: boolean; // assigned to the lead designer
-  followUp: FollowUpStatus | null;
-  calendarSlot?: string;
-  lookbook?: LookbookDispatch;
-  preOverride?: PreOverride;
   transcript: TranscriptItem[];
   outputs: Record<OutputKey, OutputResult>;
   hubspot?: HubspotPush;
@@ -89,12 +67,6 @@ const LEAD_DESIGNER = {
   email: 'divyatej_singh@pg27.mesaschool.co',
   role: 'Lead Interior Designer',
 };
-
-const FOLLOW_UPS: { key: FollowUpStatus; label: string; icon: React.ReactNode; active: string }[] = [
-  { key: 'call-due', label: 'Call Due in 30m', icon: <Timer className="h-3.5 w-3.5" />, active: 'bg-amber-600 text-white border-amber-600' },
-  { key: 'first-touch', label: 'First Touch Completed', icon: <PhoneCall className="h-3.5 w-3.5" />, active: 'bg-emerald-600 text-white border-emerald-600' },
-  { key: 'site-visit', label: 'Site Visit Booked', icon: <MapPinned className="h-3.5 w-3.5" />, active: 'bg-slate-900 text-amber-200 border-slate-900' },
-];
 
 /* ---------------------------- Mock data -------------------------- */
 
@@ -120,8 +92,6 @@ const INITIAL_CALLS: CallLead[] = [
     cutNote:
       'Caller asked twice for a fixed ₹/sq.ft. rate. Vaani explained that studio pricing is indicative only and needs a site measurement before any binding quote.',
     assigned: true,
-    followUp: 'call-due',
-    calendarSlot: 'Wed 7 Oct · 11:30 – 11:45 AM',
     transcript: [
       { id: 't1', speaker: 'agent', at: 2, text: 'Namaste, you have reached Aangan Studio. I am Vaani, the studio assistant. How can I help you today?' },
       { id: 't2', speaker: 'caller', at: 9, text: 'Hi, I just got possession of a flat in Baner. It is a bare shell 3BHK and I want complete interiors done.' },
@@ -162,7 +132,6 @@ const INITIAL_CALLS: CallLead[] = [
       "Sunita lives in an occupied 2BHK in Kothrud and wants to repair kitchen cabinets and replace the countertop on a ₹1.5L budget. This is below the studio's full-interior minimum and is a repair job, so it was politely declined and she was pointed to a local contractor.",
     cutApplied: false,
     assigned: false,
-    followUp: null,
     transcript: [
       { id: 't1', speaker: 'agent', at: 2, text: 'Namaste, this is Vaani from Aangan Studio. How may I help you?' },
       { id: 't2', speaker: 'caller', at: 8, text: 'My kitchen cabinets are damaged by moisture. I want them repaired and the countertop changed.' },
@@ -200,7 +169,6 @@ const INITIAL_CALLS: CallLead[] = [
     cutNote:
       'Caller asked for an "approximate price per sq.ft." Vaani declined to give a binding figure and offered a designer follow-up once the site is accessible.',
     assigned: true,
-    followUp: null,
     transcript: [
       { id: 't1', speaker: 'agent', at: 2, text: 'Good morning, you have reached Aangan Studio. I am Vaani. How can I help?' },
       { id: 't2', speaker: 'caller', at: 8, text: 'Hello, I have booked a 2BHK in Wakad. Possession will be in about six months. I am just exploring interior designers.' },
@@ -238,8 +206,6 @@ const INITIAL_CALLS: CallLead[] = [
       'The Gadgils own a 2,100 sq.ft. duplex in Koregaon Park and want a premium redesign of living areas and bedrooms within ₹35–45L, starting next month. They want a site visit this week.',
     cutApplied: false,
     assigned: true,
-    followUp: 'first-touch',
-    calendarSlot: 'Thu 8 Oct · 4:00 – 4:15 PM',
     transcript: [
       { id: 't1', speaker: 'agent', at: 2, text: 'Namaste, Aangan Studio, Vaani speaking. How may I help you?' },
       { id: 't2', speaker: 'caller', at: 8, text: 'We own a duplex in Koregaon Park and want a premium redesign. About 2,100 square feet.' },
@@ -289,10 +255,6 @@ function isAfterHours(iso: string) {
 function formatClock(sec: number) {
   const s = Math.max(0, Math.floor(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-}
-
-function nowLabel() {
-  return new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
 const QUAL_STYLES: Record<Qualification, string> = {
@@ -367,14 +329,10 @@ export default function CallConsolePage() {
   const [query, setQuery] = useState('');
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
-  const [toast, setToast] = useState<string | null>(null);
-  const [calendarPreview, setCalendarPreview] = useState(false);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   const selected = calls.find((c) => c.id === selectedId) ?? calls[0];
   const afterHours = isAfterHours(selected.receivedAt);
-  const hasCalendarHold = selected.outputs.calendar.status === 'delivered' && !!selected.calendarSlot;
-  const canSendLookbook = selected.qualification !== 'Out of Scope';
 
   const visibleCalls = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -392,25 +350,10 @@ export default function CallConsolePage() {
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
   }, [calls, tab, query]);
 
-  function updateSelected(patch: (c: CallLead) => CallLead) {
-    setCalls((prev) => prev.map((c) => (c.id === selectedId ? patch(c) : c)));
-  }
-
-  function notify(message: string) {
-    setToast(message);
-  }
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
-
   // Reset playback and transient UI when switching calls.
   useEffect(() => {
     setPlaying(false);
     setPosition(0);
-    setCalendarPreview(false);
   }, [selectedId]);
 
   // Mock playback clock.
@@ -445,70 +388,6 @@ export default function CallConsolePage() {
   function togglePlay() {
     if (position >= selected.durationSec) setPosition(0);
     setPlaying((p) => !p);
-  }
-
-  /* ---- Operational actions ---- */
-
-  function sendLookbook(channel: Channel) {
-    updateSelected((c) => ({ ...c, lookbook: { channel, sentAt: nowLabel() } }));
-    notify(`Lookbook PDF sent to ${selected.callerName} via ${channel}`);
-  }
-
-  function setFollowUp(status: FollowUpStatus) {
-    updateSelected((c) => ({ ...c, followUp: c.followUp === status ? null : status }));
-  }
-
-  function requalify() {
-    const at = nowLabel();
-    updateSelected((c) => {
-      const mid = c.entities.budget;
-      return {
-        ...c,
-        preOverride: {
-          qualification: c.qualification,
-          outputs: c.outputs,
-          hubspot: c.hubspot,
-          calendarSlot: c.calendarSlot,
-          assigned: c.assigned,
-          followUp: c.followUp,
-        },
-        qualification: 'Qualified',
-        assigned: true,
-        followUp: 'call-due',
-        calendarSlot: 'Next free slot · Tomorrow 11:00 – 11:15 AM',
-        hubspot: {
-          stage: 'Qualified – Manual Override',
-          pipelineValue: c.hubspot?.pipelineValue ?? `${mid} (to be refined)`,
-          margin: c.hubspot?.margin ?? 'Unit economics pending site measurement',
-        },
-        outputs: {
-          dashboard: { status: 'delivered', detail: 'Re-qualified by Front Desk; live for Divyatej Singh', syncedAt: at },
-          hubspot: { status: 'delivered', detail: 'Deal moved to "Qualified – Manual Override"', syncedAt: at },
-          email: { status: 'delivered', detail: `Lead briefing dossier sent to ${LEAD_DESIGNER.email}`, syncedAt: at },
-          calendar: { status: 'delivered', detail: '15-min discovery hold booked: tomorrow, 11:00 AM', syncedAt: at },
-        },
-      };
-    });
-    notify('Marked Qualified. HubSpot, briefing email and calendar hold dispatched.');
-  }
-
-  function revertOverride() {
-    updateSelected((c) => {
-      const p = c.preOverride;
-      if (!p) return c;
-      return {
-        ...c,
-        qualification: p.qualification,
-        outputs: p.outputs,
-        hubspot: p.hubspot,
-        calendarSlot: p.calendarSlot,
-        assigned: p.assigned,
-        followUp: p.followUp,
-        preOverride: undefined,
-      };
-    });
-    setCalendarPreview(false);
-    notify('Override reverted to the AI qualification.');
   }
 
   const pct = selected.durationSec ? (position / selected.durationSec) * 100 : 0;
@@ -608,11 +487,6 @@ export default function CallConsolePage() {
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-xl font-semibold text-slate-900">{selected.callerName}</h2>
                 <QualBadge q={selected.qualification} />
-                {selected.preOverride && (
-                  <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-amber-200">
-                    Manual override
-                  </span>
-                )}
                 {afterHours && <AfterHoursTag />}
               </div>
               <p className="mt-1 text-sm text-stone-500">
@@ -673,117 +547,6 @@ export default function CallConsolePage() {
                 </div>
               </div>
             </div>
-          </section>
-
-          {/* Action bar */}
-          <section className="mt-5 rounded-2xl border border-stone-200 bg-white p-4">
-            <div className="grid gap-4 lg:grid-cols-2">
-              {/* Follow-up SLA */}
-              <div>
-                <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-500">Designer follow-up status</h3>
-                <div className="flex flex-wrap gap-2">
-                  {FOLLOW_UPS.map((f) => {
-                    const on = selected.followUp === f.key;
-                    return (
-                      <button
-                        key={f.key}
-                        disabled={!selected.assigned}
-                        onClick={() => setFollowUp(f.key)}
-                        aria-pressed={on}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                          on ? f.active : 'border-stone-300 bg-white text-slate-700 hover:border-amber-400'
-                        }`}
-                      >
-                        {f.icon}
-                        {f.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                {!selected.assigned && (
-                  <p className="mt-1.5 text-xs text-stone-500">Available once the lead is qualified and routed to Divyatej.</p>
-                )}
-              </div>
-
-              {/* Lookbook dispatch */}
-              <div>
-                <h3 className="mb-2 text-[11px] font-medium uppercase tracking-wide text-stone-500">Send lookbook while discovery call is pending</h3>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    disabled={!canSendLookbook}
-                    onClick={() => sendLookbook('WhatsApp')}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
-                  </button>
-                  <button
-                    disabled={!canSendLookbook}
-                    onClick={() => sendLookbook('SMS')}
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <MessageSquare className="h-3.5 w-3.5" /> SMS
-                  </button>
-                  <span className="inline-flex items-center gap-1 text-xs text-stone-500">
-                    <FileText className="h-3.5 w-3.5" /> Aangan-Lookbook.pdf
-                  </span>
-                </div>
-                <p className="mt-1.5 text-xs text-stone-500">
-                  {selected.lookbook
-                    ? `Sent via ${selected.lookbook.channel} at ${selected.lookbook.sentAt} to ${selected.phone}`
-                    : canSendLookbook
-                    ? `Will be sent to ${selected.phone}`
-                    : 'Disabled for Out of Scope calls. Re-qualify to enable.'}
-                </p>
-              </div>
-            </div>
-
-            {/* Override + calendar */}
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-stone-100 pt-4">
-              {selected.preOverride ? (
-                <button
-                  onClick={revertOverride}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-stone-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-amber-400"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" /> Revert to {selected.preOverride.qualification}
-                </button>
-              ) : selected.qualification !== 'Qualified' ? (
-                <button
-                  onClick={requalify}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-2 text-xs font-medium text-white transition hover:bg-amber-700"
-                >
-                  <ArrowUpCircle className="h-3.5 w-3.5" /> Re-qualify as Qualified (caller called back with new scope)
-                </button>
-              ) : null}
-
-              {hasCalendarHold && (
-                <button
-                  onClick={() => setCalendarPreview(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-medium text-amber-100 transition hover:bg-slate-800"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  View in Google Calendar ({LEAD_DESIGNER.email})
-                </button>
-              )}
-            </div>
-
-            {calendarPreview && selected.calendarSlot && (
-              <div className="mt-3 flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
-                <div className="flex items-start gap-3">
-                  <CalendarCheck className="mt-0.5 h-5 w-5 text-amber-700" />
-                  <div className="text-sm">
-                    <div className="font-semibold text-amber-900">Discovery call · {selected.callerName}</div>
-                    <div className="text-amber-900/80">{selected.calendarSlot}</div>
-                    <div className="text-xs text-amber-900/70">
-                      Calendar: {LEAD_DESIGNER.email} · {selected.entities.location} · {selected.phone}
-                    </div>
-                    <div className="mt-1 text-xs text-amber-800/70">Simulated: this would open the event in Google Calendar.</div>
-                  </div>
-                </div>
-                <button onClick={() => setCalendarPreview(false)} aria-label="Close calendar preview" className="text-amber-800 hover:text-amber-950">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            )}
           </section>
 
           {/* Two-column layout */}
@@ -920,15 +683,6 @@ export default function CallConsolePage() {
           </div>
         </div>
 
-        {toast && (
-          <div
-            role="status"
-            className="fixed bottom-5 left-1/2 z-50 flex max-w-[90vw] -translate-x-1/2 items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm text-amber-50 shadow-lg"
-          >
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
-            {toast}
-          </div>
-        )}
       </main>
     </div>
   );
