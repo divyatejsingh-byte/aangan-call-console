@@ -34,7 +34,6 @@ interface StatusIndicator {
 /* ---------------------------- Constants -------------------------- */
 
 const TEST_PASSWORD = '1234';
-const AUTH_KEY = 'aangan-auth';
 
 // Dark-graded in CSS below. Swap this URL for a darker studio photograph at any time.
 const HERO_IMAGE =
@@ -79,31 +78,36 @@ export default function DesignerGateway() {
     img.src = HERO_IMAGE;
   }, []);
 
-  function enter() {
-    try {
-      sessionStorage.setItem(AUTH_KEY, '1');
-    } catch {
-      // Private mode: the dashboard will send the user back here.
-    }
+  async function signIn(emailValue: string, passwordValue: string) {
     setSubmitting(true);
-    router.push('/dashboard');
+    setError(null);
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: emailValue, password: passwordValue }),
+      });
+      if (!res.ok) {
+        setError(`Unauthorized key. Use test password ${TEST_PASSWORD}`);
+        setSubmitting(false);
+        return;
+      }
+      router.push('/dashboard');
+    } catch {
+      setError('Could not reach the server. Please try again.');
+      setSubmitting(false);
+    }
   }
 
   function directAccess() {
     setEmail(DESIGNER.email);
     setPassword(TEST_PASSWORD);
-    setError(null);
-    enter();
+    void signIn(DESIGNER.email, TEST_PASSWORD);
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (password !== TEST_PASSWORD) {
-      setError(`Unauthorized key. Use test password ${TEST_PASSWORD}`);
-      return;
-    }
-    setError(null);
-    enter();
+    void signIn(email, password);
   }
 
   return (

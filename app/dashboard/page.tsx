@@ -1,64 +1,44 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Phone, Search, Moon, Play, Pause, Clock, MapPin, Home, Ruler, IndianRupee,
-  CalendarClock, ShieldCheck, Sparkles, LayoutDashboard, Database, Mail,
-  CalendarCheck, CheckCircle2, CircleDashed, MinusCircle, UserCheck, Bot, User,
-  AlertTriangle, CalendarDays, ChevronDown, LogOut,
+  Phone, Search, Moon, Clock, UserCheck, CalendarDays, ChevronDown, LogOut,
+  Radio, RefreshCw, Inbox, FileText, Sparkles, PhoneIncoming, CheckCircle2, CircleDashed,
 } from 'lucide-react';
 
 /* ----------------------------- Types ----------------------------- */
 
-type Qualification = 'Qualified' | 'Nurture' | 'Out of Scope';
-type FilterTab = 'all' | 'qualified' | 'after-hours';
-type OutputStatus = 'delivered' | 'scheduled' | 'skipped';
-type OutputKey = 'dashboard' | 'hubspot' | 'email' | 'calendar';
+type FilterTab = 'all' | 'after-hours';
 
-interface TranscriptItem {
+interface VaaniPayload {
+  event?: string;
+  type?: string;
+  timestamp?: string;
+  from?: string;
+  to?: string;
+  data?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface WebhookEvent {
   id: string;
-  speaker: 'caller' | 'agent';
-  at: number; // seconds from call start
-  text: string;
+  event_type: string | null;
+  received_at: string;
+  payload: VaaniPayload;
 }
 
-interface DossierEntities {
-  propertyType: string;
-  scope: string;
-  carpetArea: string;
-  budget: string;
-  location: string;
-  timeline: string;
-}
-
-interface OutputResult {
-  status: OutputStatus;
-  detail: string;
-  syncedAt?: string;
-}
-
-interface HubspotPush {
-  stage: string;
-  pipelineValue: string;
-  margin: string;
-}
-
-interface CallLead {
-  id: string;
-  callerName: string;
-  phone: string;
-  receivedAt: string; // ISO with +05:30 offset, studio local time
-  durationSec: number;
-  qualification: Qualification;
-  entities: DossierEntities;
-  summary: string;
-  cutApplied: boolean;
-  cutNote?: string;
-  assigned: boolean; // assigned to the lead designer
-  transcript: TranscriptItem[];
-  outputs: Record<OutputKey, OutputResult>;
-  hubspot?: HubspotPush;
+interface CallRecord {
+  id: string; // Vaani room_name
+  caller: string;
+  to: string;
+  agent: string;
+  callType: string;
+  startedAt: Date;
+  events: WebhookEvent[]; // oldest first
+  ended: boolean;
+  transcript: string | null;
+  summary: string | null;
 }
 
 /* ---------------------------- Constants -------------------------- */
@@ -69,210 +49,89 @@ const LEAD_DESIGNER = {
   role: 'Lead Interior Designer',
 };
 
-/* ---------------------------- Mock data -------------------------- */
-
-const INITIAL_CALLS: CallLead[] = [
-  {
-    id: 'c1',
-    callerName: 'Rahul Deshmukh',
-    phone: '+91 98230 41187',
-    receivedAt: '2026-10-06T21:42:00+05:30',
-    durationSec: 252,
-    qualification: 'Qualified',
-    entities: {
-      propertyType: '3BHK, bare shell',
-      scope: 'Full-home interiors (turnkey)',
-      carpetArea: '1,150 sq.ft.',
-      budget: '₹12L – ₹14L',
-      location: 'Baner, Pune',
-      timeline: 'Possession in hand; wants to start in 3–4 weeks',
-    },
-    summary:
-      'Rahul has just taken possession of a 1,150 sq.ft. bare-shell 3BHK in Baner and wants full turnkey interiors within ₹12–14L. He is ready to start within a month and asked for a per-sq-ft rate, which Vaani declined to quote. He prefers a call after 11am on weekdays.',
-    cutApplied: true,
-    cutNote:
-      'Caller asked twice for a fixed ₹/sq.ft. rate. Vaani explained that studio pricing is indicative only and needs a site measurement before any binding quote.',
-    assigned: true,
-    transcript: [
-      { id: 't1', speaker: 'agent', at: 2, text: 'Namaste, you have reached Aangan Studio. I am Vaani, the studio assistant. How can I help you today?' },
-      { id: 't2', speaker: 'caller', at: 9, text: 'Hi, I just got possession of a flat in Baner. It is a bare shell 3BHK and I want complete interiors done.' },
-      { id: 't3', speaker: 'agent', at: 19, text: 'Congratulations on the new home! Could you tell me the carpet area and roughly what budget you have in mind?' },
-      { id: 't4', speaker: 'caller', at: 28, text: 'Carpet is about 1,150 square feet. We are thinking twelve to fourteen lakhs all-in.' },
-      { id: 't5', speaker: 'agent', at: 40, text: 'Noted. And when would you like work to begin? Is the possession already complete?' },
-      { id: 't6', speaker: 'caller', at: 49, text: 'Yes, possession is done. We want to start within three or four weeks. Before that, what is your rate per square foot?' },
-      { id: 't7', speaker: 'agent', at: 62, text: 'I cannot quote a binding per-square-foot rate over the phone. Our pricing is indicative and depends on a site measurement and your material choices. Our lead designer will walk the site and give you a proper estimate.' },
-      { id: 't8', speaker: 'caller', at: 80, text: 'Okay, fair enough. Just give me a ballpark so I know we are in the right range.' },
-      { id: 't9', speaker: 'agent', at: 90, text: 'Projects like a 3BHK bare shell in your range are typically served within ₹12–14L, but I will not commit a number until the site is measured. Shall I book a 15-minute discovery call?' },
-      { id: 't10', speaker: 'caller', at: 108, text: 'Yes please. Tomorrow after 11 works.' },
-      { id: 't11', speaker: 'agent', at: 116, text: 'Done. I have held tomorrow 11:30am for you. Divyatej Singh will call you, and he will receive your details beforehand.' },
-    ],
-    outputs: {
-      dashboard: { status: 'delivered', detail: 'Live for Front Desk & Divyatej Singh', syncedAt: '9:46 PM' },
-      hubspot: { status: 'delivered', detail: 'Deal created in "Qualified – Discovery Pending"', syncedAt: '9:46 PM' },
-      email: { status: 'delivered', detail: `Lead briefing dossier sent to ${LEAD_DESIGNER.email}`, syncedAt: '9:47 PM' },
-      calendar: { status: 'delivered', detail: '15-min discovery hold booked: Wed 7 Oct, 11:30 AM', syncedAt: '9:47 PM' },
-    },
-    hubspot: { stage: 'Qualified – Discovery Pending', pipelineValue: '₹13L (midpoint)', margin: '≈ 28% est. gross margin' },
-  },
-  {
-    id: 'c2',
-    callerName: 'Sunita Bhosale',
-    phone: '+91 99224 70564',
-    receivedAt: '2026-10-07T11:15:00+05:30',
-    durationSec: 118,
-    qualification: 'Out of Scope',
-    entities: {
-      propertyType: '2BHK, occupied',
-      scope: 'Partial kitchen repair (cabinet & countertop)',
-      carpetArea: 'Kitchen only (~90 sq.ft.)',
-      budget: '₹1.5L',
-      location: 'Kothrud, Pune',
-      timeline: 'Within 2 weeks',
-    },
-    summary:
-      "Sunita lives in an occupied 2BHK in Kothrud and wants to repair kitchen cabinets and replace the countertop on a ₹1.5L budget. This is below the studio's full-interior minimum and is a repair job, so it was politely declined and she was pointed to a local contractor.",
-    cutApplied: false,
-    assigned: false,
-    transcript: [
-      { id: 't1', speaker: 'agent', at: 2, text: 'Namaste, this is Vaani from Aangan Studio. How may I help you?' },
-      { id: 't2', speaker: 'caller', at: 8, text: 'My kitchen cabinets are damaged by moisture. I want them repaired and the countertop changed.' },
-      { id: 't3', speaker: 'agent', at: 20, text: 'I am sorry to hear that. Is this the whole kitchen or a partial repair? And what budget do you have?' },
-      { id: 't4', speaker: 'caller', at: 31, text: 'Only repair, nothing else in the house. Around one and a half lakh.' },
-      { id: 't5', speaker: 'agent', at: 44, text: 'Thank you for being clear. Aangan Studio focuses on full-home design projects, so a partial repair would not be a good fit for us. A local carpenter or modular kitchen service in Kothrud would serve you better and faster.' },
-      { id: 't6', speaker: 'caller', at: 66, text: 'Okay, understood. Thanks for telling me directly.' },
-      { id: 't7', speaker: 'agent', at: 74, text: 'Of course. If you plan a larger renovation later, please call us again. Have a good day!' },
-    ],
-    outputs: {
-      dashboard: { status: 'delivered', detail: 'Logged as Out of Scope for Front Desk', syncedAt: '11:17 AM' },
-      hubspot: { status: 'skipped', detail: 'Not pushed: below minimum project scope' },
-      email: { status: 'skipped', detail: 'No briefing sent: lead not qualified' },
-      calendar: { status: 'skipped', detail: 'No discovery call needed' },
-    },
-  },
-  {
-    id: 'c3',
-    callerName: 'Ananya Kapoor',
-    phone: '+91 97657 12903',
-    receivedAt: '2026-10-07T07:28:00+05:30',
-    durationSec: 207,
-    qualification: 'Nurture',
-    entities: {
-      propertyType: '2BHK, under construction',
-      scope: 'Full interiors, modular + custom wardrobes',
-      carpetArea: '860 sq.ft.',
-      budget: '₹7L – ₹9L',
-      location: 'Wakad, Pune',
-      timeline: 'Possession in ~6 months (April 2027)',
-    },
-    summary:
-      'Ananya has booked a 860 sq.ft. 2BHK in Wakad with possession about six months away and is comparing studios early. Budget is ₹7–9L for modular interiors. She is not ready for a site visit yet, so the lead is parked for a follow-up in January.',
-    cutApplied: true,
-    cutNote:
-      'Caller asked for an "approximate price per sq.ft." Vaani declined to give a binding figure and offered a designer follow-up once the site is accessible.',
-    assigned: true,
-    transcript: [
-      { id: 't1', speaker: 'agent', at: 2, text: 'Good morning, you have reached Aangan Studio. I am Vaani. How can I help?' },
-      { id: 't2', speaker: 'caller', at: 8, text: 'Hello, I have booked a 2BHK in Wakad. Possession will be in about six months. I am just exploring interior designers.' },
-      { id: 't3', speaker: 'agent', at: 21, text: 'Lovely, it is great to plan early. What is the carpet area and your approximate budget?' },
-      { id: 't4', speaker: 'caller', at: 32, text: 'Around 860 square feet. Seven to nine lakhs. What would be your per square foot cost?' },
-      { id: 't5', speaker: 'agent', at: 45, text: 'I cannot give a binding per-square-foot price on the phone since it depends on measurements and finishes. Our lead designer can share an indicative range once your site is accessible.' },
-      { id: 't6', speaker: 'caller', at: 63, text: 'Alright. We will not be able to visit before possession, so let us talk later.' },
-      { id: 't7', speaker: 'agent', at: 74, text: 'Understood. I will share your details with Divyatej Singh, who will reach out closer to possession. Is that alright?' },
-      { id: 't8', speaker: 'caller', at: 88, text: 'Yes, that works. Thank you.' },
-    ],
-    outputs: {
-      dashboard: { status: 'delivered', detail: 'Live for Front Desk & Divyatej Singh', syncedAt: '7:31 AM' },
-      hubspot: { status: 'delivered', detail: 'Deal created in "Nurture – Follow up Jan 2027"', syncedAt: '7:31 AM' },
-      email: { status: 'delivered', detail: `Lead briefing dossier sent to ${LEAD_DESIGNER.email}`, syncedAt: '7:32 AM' },
-      calendar: { status: 'scheduled', detail: 'Discovery hold deferred; reminder set for 12 Jan 2027' },
-    },
-    hubspot: { stage: 'Nurture – Follow up Jan 2027', pipelineValue: '₹8L (midpoint)', margin: '≈ 24% est. gross margin' },
-  },
-  {
-    id: 'c4',
-    callerName: 'Mihir & Prachi Gadgil',
-    phone: '+91 98900 33621',
-    receivedAt: '2026-10-07T15:05:00+05:30',
-    durationSec: 301,
-    qualification: 'Qualified',
-    entities: {
-      propertyType: '4BHK duplex, semi-furnished',
-      scope: 'Premium interiors + living/dining redesign',
-      carpetArea: '2,100 sq.ft.',
-      budget: '₹35L – ₹45L',
-      location: 'Koregaon Park, Pune',
-      timeline: 'Ready to start next month',
-    },
-    summary:
-      'The Gadgils own a 2,100 sq.ft. duplex in Koregaon Park and want a premium redesign of living areas and bedrooms within ₹35–45L, starting next month. They want a site visit this week.',
-    cutApplied: false,
-    assigned: true,
-    transcript: [
-      { id: 't1', speaker: 'agent', at: 2, text: 'Namaste, Aangan Studio, Vaani speaking. How may I help you?' },
-      { id: 't2', speaker: 'caller', at: 8, text: 'We own a duplex in Koregaon Park and want a premium redesign. About 2,100 square feet.' },
-      { id: 't3', speaker: 'agent', at: 20, text: 'Wonderful. What budget range and timeline are you thinking?' },
-      { id: 't4', speaker: 'caller', at: 29, text: 'Thirty-five to forty-five lakhs, and we would like to start next month.' },
-      { id: 't5', speaker: 'agent', at: 41, text: 'Great. I will book a 15-minute discovery call with Divyatej Singh, our lead designer. Does Thursday at 4pm work?' },
-      { id: 't6', speaker: 'caller', at: 55, text: 'Thursday 4pm is perfect.' },
-    ],
-    outputs: {
-      dashboard: { status: 'delivered', detail: 'Live for Front Desk & Divyatej Singh', syncedAt: '3:09 PM' },
-      hubspot: { status: 'delivered', detail: 'Deal created in "Qualified – Discovery Booked"', syncedAt: '3:09 PM' },
-      email: { status: 'delivered', detail: `Lead briefing dossier sent to ${LEAD_DESIGNER.email}`, syncedAt: '3:10 PM' },
-      calendar: { status: 'delivered', detail: '15-min discovery hold booked: Thu 8 Oct, 4:00 PM', syncedAt: '3:10 PM' },
-    },
-    hubspot: { stage: 'Qualified – Discovery Booked', pipelineValue: '₹40L (midpoint)', margin: '≈ 31% est. gross margin' },
-  },
-];
+const POLL_MS = 15000;
 
 /* ---------------------------- Helpers ---------------------------- */
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-// Parse straight from the ISO string so studio local time is shown regardless of viewer timezone.
-function parseLocal(iso: string) {
-  const [d, t] = iso.split('T');
-  const [y, m, day] = d.split('-').map(Number);
-  const [hh, mm] = t.slice(0, 5).split(':').map(Number);
-  return { y, m, day, hh, mm };
+function str(v: unknown): string {
+  return typeof v === 'string' ? v : '';
 }
 
-function formatTime(iso: string) {
-  const { hh, mm } = parseLocal(iso);
-  const h12 = hh % 12 === 0 ? 12 : hh % 12;
-  return `${h12}:${String(mm).padStart(2, '0')} ${hh >= 12 ? 'PM' : 'AM'}`;
+// Look for a field anywhere in an event payload (Vaani's end-of-call format isn't confirmed yet).
+function findField(obj: unknown, names: string[], depth = 0): unknown {
+  if (!obj || typeof obj !== 'object' || depth > 4) return undefined;
+  const rec = obj as Record<string, unknown>;
+  for (const n of names) if (rec[n] !== undefined && rec[n] !== null && rec[n] !== '') return rec[n];
+  for (const v of Object.values(rec)) {
+    const found = findField(v, names, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
 }
 
-function formatDate(iso: string) {
-  const { m, day } = parseLocal(iso);
-  return `${day} ${MONTHS[m - 1]}`;
+function asText(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v === 'string') return v;
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return null;
+  }
 }
 
-function isAfterHours(iso: string) {
-  const { hh } = parseLocal(iso);
-  return hh < 10 || hh >= 19;
+function groupCalls(events: WebhookEvent[]): CallRecord[] {
+  const map = new Map<string, WebhookEvent[]>();
+  for (const e of events) {
+    const id = str(e.payload?.data?.room_name);
+    if (!id) continue; // not a call event (e.g. connectivity pings)
+    map.set(id, [...(map.get(id) ?? []), e]);
+  }
+
+  return [...map.entries()]
+    .map(([id, list]) => {
+      const evts = [...list].sort((a, b) => a.received_at.localeCompare(b.received_at));
+      const first = evts[0];
+      const data = first.payload.data ?? {};
+      const ts = new Date(str(first.payload.timestamp) || first.received_at);
+      const transcript = asText(evts.map((e) => findField(e.payload.data, ['transcript', 'transcription', 'conversation'])).find((v) => v !== undefined));
+      const summary = asText(evts.map((e) => findField(e.payload.data, ['summary', 'call_summary'])).find((v) => v !== undefined));
+      return {
+        id,
+        caller: str(data.caller) || str(first.payload.from) || 'Unknown caller',
+        to: str(first.payload.to),
+        agent: str(data.agent_name),
+        callType: str(data.call_type),
+        startedAt: isNaN(ts.getTime()) ? new Date(first.received_at) : ts,
+        events: evts,
+        ended: evts.some((e) => /end|complet|finish|hangup/i.test(e.event_type ?? '')),
+        transcript,
+        summary,
+      };
+    })
+    .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
 }
 
-function formatClock(sec: number) {
-  const s = Math.max(0, Math.floor(sec));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+const IST = 'Asia/Kolkata';
+
+function istParts(d: Date) {
+  const f = new Intl.DateTimeFormat('en-IN', { timeZone: IST, hour: 'numeric', hour12: false });
+  return { hour: Number(f.format(d)) % 24 };
 }
 
-const QUAL_STYLES: Record<Qualification, string> = {
-  Qualified: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  Nurture: 'bg-amber-50 text-amber-800 ring-amber-200',
-  'Out of Scope': 'bg-slate-100 text-slate-600 ring-slate-300',
-};
+function isAfterHours(d: Date) {
+  const { hour } = istParts(d);
+  return hour < 10 || hour >= 19;
+}
+
+function fmtDate(d: Date) {
+  return d.toLocaleString('en-IN', { timeZone: IST, day: 'numeric', month: 'short' });
+}
+
+function fmtTime(d: Date) {
+  return d.toLocaleString('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit', hour12: true });
+}
 
 /* ---------------------------- Components ------------------------- */
-
-function QualBadge({ q }: { q: Qualification }) {
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${QUAL_STYLES[q]}`}>
-      {q}
-    </span>
-  );
-}
 
 function AfterHoursTag() {
   return (
@@ -282,42 +141,27 @@ function AfterHoursTag() {
   );
 }
 
-function EntityCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-stone-200 bg-white p-3.5">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-500">
-        <span className="text-amber-700">{icon}</span>
-        {label}
-      </div>
-      <div className="text-sm font-semibold leading-snug text-slate-900">{value}</div>
-    </div>
+function StatusTag({ ended }: { ended: boolean }) {
+  return ended ? (
+    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+      <CheckCircle2 className="h-3 w-3" /> Call ended
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+      <CircleDashed className="h-3 w-3" /> Started · awaiting end-of-call data
+    </span>
   );
 }
 
-const OUTPUT_META: Record<OutputKey, { title: string; sub: string; icon: React.ReactNode }> = {
-  dashboard: { title: 'Operational Dashboard', sub: 'Live synced for Front Desk & Divyatej Singh', icon: <LayoutDashboard className="h-4 w-4" /> },
-  hubspot: { title: 'HubSpot CRM', sub: 'Deal stage, pipeline value & unit economics for Nikhil', icon: <Database className="h-4 w-4" /> },
-  email: { title: 'Designer Email', sub: `Lead briefing dossier to ${LEAD_DESIGNER.email}`, icon: <Mail className="h-4 w-4" /> },
-  calendar: { title: 'Calendar Hold', sub: `15-min discovery hold on ${LEAD_DESIGNER.email}`, icon: <CalendarCheck className="h-4 w-4" /> },
-};
-
-function StatusPill({ status }: { status: OutputStatus }) {
-  if (status === 'delivered')
-    return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700">
-        <CheckCircle2 className="h-4 w-4" /> Delivered
-      </span>
-    );
-  if (status === 'scheduled')
-    return (
-      <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700">
-        <CircleDashed className="h-4 w-4" /> Scheduled
-      </span>
-    );
+function Pending({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500">
-      <MinusCircle className="h-4 w-4" /> Skipped
-    </span>
+    <section className="rounded-2xl border border-dashed border-stone-300 bg-white p-4">
+      <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-slate-900">
+        <span className="text-amber-700">{icon}</span>
+        {title}
+      </div>
+      <p className="text-sm text-stone-500">{text}</p>
+    </section>
   );
 }
 
@@ -325,95 +169,60 @@ function StatusPill({ status }: { status: OutputStatus }) {
 
 export default function CallConsolePage() {
   const router = useRouter();
-  const [authChecked, setAuthChecked] = useState(false);
-  const [calls, setCalls] = useState<CallLead[]>(INITIAL_CALLS);
-  const [selectedId, setSelectedId] = useState<string>(INITIAL_CALLS[0].id);
+  const [events, setEvents] = useState<WebhookEvent[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tab, setTab] = useState<FilterTab>('all');
   const [query, setQuery] = useState('');
-  const [playing, setPlaying] = useState(false);
-  const [position, setPosition] = useState(0);
   const [showCalendar, setShowCalendar] = useState(true);
-  const transcriptRef = useRef<HTMLDivElement>(null);
 
-  // Front-end gate only: the landing page sets this flag after sign-in.
-  useEffect(() => {
-    let ok = false;
+  const load = useCallback(async () => {
+    setRefreshing(true);
     try {
-      ok = sessionStorage.getItem('aangan-auth') === '1';
-    } catch {}
-    if (ok) setAuthChecked(true);
-    else router.replace('/');
+      const res = await fetch('/api/calls', { cache: 'no-store' });
+      if (res.status === 401) {
+        router.replace('/');
+        return;
+      }
+      if (!res.ok) throw new Error('bad status');
+      const json = (await res.json()) as { events: WebhookEvent[] };
+      setEvents(json.events);
+      setLoadError(null);
+      setLastSync(new Date());
+    } catch {
+      setLoadError('Could not load calls. Retrying…');
+    } finally {
+      setRefreshing(false);
+    }
   }, [router]);
 
-  function signOut() {
+  useEffect(() => {
+    void load();
+    const t = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(t);
+  }, [load]);
+
+  async function signOut() {
     try {
-      sessionStorage.removeItem('aangan-auth');
-    } catch {}
-    router.push('/');
+      await fetch('/api/logout', { method: 'POST' });
+    } finally {
+      router.push('/');
+    }
   }
 
-  const selected = calls.find((c) => c.id === selectedId) ?? calls[0];
-  const afterHours = isAfterHours(selected.receivedAt);
+  const calls = useMemo(() => groupCalls(events ?? []), [events]);
 
-  const visibleCalls = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return calls
-      .filter((c) => {
-        if (tab === 'qualified' && c.qualification !== 'Qualified') return false;
-        if (tab === 'after-hours' && !isAfterHours(c.receivedAt)) return false;
-        if (!q) return true;
-        return (
-          c.callerName.toLowerCase().includes(q) ||
-          c.phone.replace(/\s/g, '').includes(q.replace(/\s/g, '')) ||
-          c.entities.location.toLowerCase().includes(q)
-        );
-      })
-      .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase().replace(/\s/g, '');
+    return calls.filter((c) => {
+      if (tab === 'after-hours' && !isAfterHours(c.startedAt)) return false;
+      return !q || c.caller.toLowerCase().replace(/\s/g, '').includes(q);
+    });
   }, [calls, tab, query]);
 
-  // Reset playback and transient UI when switching calls.
-  useEffect(() => {
-    setPlaying(false);
-    setPosition(0);
-  }, [selectedId]);
-
-  // Mock playback clock.
-  useEffect(() => {
-    if (!playing) return;
-    const timer = setInterval(() => {
-      setPosition((p) => {
-        if (p + 1 >= selected.durationSec) {
-          setPlaying(false);
-          return selected.durationSec;
-        }
-        return p + 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [playing, selected.durationSec]);
-
-  // Active transcript line follows the playhead.
-  const activeId = useMemo(() => {
-    let id: string | null = null;
-    for (const item of selected.transcript) if (item.at <= position) id = item.id;
-    return id;
-  }, [selected, position]);
-
-  useEffect(() => {
-    if (!playing || !activeId) return;
-    transcriptRef.current
-      ?.querySelector<HTMLElement>(`[data-id="${activeId}"]`)
-      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }, [activeId, playing]);
-
-  function togglePlay() {
-    if (position >= selected.durationSec) setPosition(0);
-    setPlaying((p) => !p);
-  }
-
-  if (!authChecked) return null;
-
-  const pct = selected.durationSec ? (position / selected.durationSec) * 100 : 0;
+  const selected = calls.find((c) => c.id === selectedId) ?? visible[0] ?? null;
 
   return (
     <div className="flex h-screen flex-col bg-stone-50 text-slate-800 md:flex-row">
@@ -441,7 +250,7 @@ export default function CallConsolePage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name, phone or locality"
+              placeholder="Search phone number"
               className="w-full rounded-lg border border-stone-200 bg-stone-50 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-stone-400 focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
             />
           </div>
@@ -449,7 +258,6 @@ export default function CallConsolePage() {
           <div className="mt-3 flex gap-1 rounded-lg bg-stone-100 p-1">
             {([
               ['all', 'All Calls'],
-              ['qualified', 'Qualified'],
               ['after-hours', 'After-Hours'],
             ] as [FilterTab, string][]).map(([key, label]) => (
               <button
@@ -466,11 +274,15 @@ export default function CallConsolePage() {
         </div>
 
         <ul className="min-h-[240px] flex-1 divide-y divide-stone-100 overflow-y-auto">
-          {visibleCalls.length === 0 && (
-            <li className="px-4 py-10 text-center text-sm text-stone-500">No calls match this filter.</li>
+          {events === null && <li className="px-4 py-10 text-center text-sm text-stone-500">Loading calls…</li>}
+          {events !== null && visible.length === 0 && (
+            <li className="px-4 py-10 text-center text-sm text-stone-500">
+              <Inbox className="mx-auto mb-2 h-6 w-6 text-stone-300" />
+              {calls.length === 0 ? 'No calls yet. Calls from Vaani appear here as they arrive.' : 'No calls match this filter.'}
+            </li>
           )}
-          {visibleCalls.map((c) => {
-            const active = c.id === selectedId;
+          {visible.map((c) => {
+            const active = c.id === selected?.id;
             return (
               <li key={c.id}>
                 <button
@@ -480,21 +292,14 @@ export default function CallConsolePage() {
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-slate-900">{c.callerName}</span>
+                    <span className="truncate text-sm font-semibold text-slate-900">{c.caller}</span>
                     <span className="shrink-0 text-xs text-stone-500">
-                      {formatDate(c.receivedAt)}, {formatTime(c.receivedAt)}
-                    </span>
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-3 text-xs text-stone-500">
-                    <span>{c.phone}</span>
-                    <span className="inline-flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      {formatClock(c.durationSec)}
+                      {fmtDate(c.startedAt)}, {fmtTime(c.startedAt)}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <QualBadge q={c.qualification} />
-                    {isAfterHours(c.receivedAt) && <AfterHoursTag />}
+                    <StatusTag ended={c.ended} />
+                    {isAfterHours(c.startedAt) && <AfterHoursTag />}
                   </div>
                 </button>
               </li>
@@ -502,8 +307,14 @@ export default function CallConsolePage() {
           })}
         </ul>
 
-        <div className="border-t border-stone-200 px-4 py-2.5 text-xs text-stone-500">
-          {calls.filter((c) => isAfterHours(c.receivedAt)).length} of {calls.length} calls arrived after hours
+        <div className="flex items-center justify-between border-t border-stone-200 px-4 py-2.5 text-xs text-stone-500">
+          <span>
+            {calls.length} call{calls.length === 1 ? '' : 's'} · {calls.filter((c) => isAfterHours(c.startedAt)).length} after hours
+          </span>
+          <button onClick={() => void load()} className="inline-flex items-center gap-1 hover:text-slate-800" aria-label="Refresh calls">
+            <RefreshCw className={`h-3 w-3 ${refreshing ? 'animate-spin' : ''}`} />
+            {lastSync ? fmtTime(lastSync) : 'Sync'}
+          </button>
         </div>
 
         <div className="hidden shrink-0 border-t border-stone-200 md:block">
@@ -514,7 +325,7 @@ export default function CallConsolePage() {
           >
             <span className="inline-flex items-center gap-2">
               <CalendarDays className="h-4 w-4 text-amber-700" />
-              {LEAD_DESIGNER.name}'s calendar
+              {LEAD_DESIGNER.name}&apos;s calendar
             </span>
             <ChevronDown className={`h-4 w-4 text-stone-400 transition ${showCalendar ? '' : '-rotate-90'}`} />
           </button>
@@ -543,210 +354,113 @@ export default function CallConsolePage() {
       </aside>
 
       {/* --------------------------- Main -------------------------- */}
-      <main className="relative flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl p-4 md:p-6">
-          {/* Header */}
-          <header className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold text-slate-900">{selected.callerName}</h2>
-                <QualBadge q={selected.qualification} />
-                {afterHours && <AfterHoursTag />}
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-4xl p-4 md:p-6">
+          {loadError && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{loadError}</div>
+          )}
+
+          {!selected ? (
+            <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 text-amber-300">
+                <Radio className="h-6 w-6" />
               </div>
-              <p className="mt-1 text-sm text-stone-500">
-                {selected.phone} · {formatDate(selected.receivedAt)}, {formatTime(selected.receivedAt)} · {formatClock(selected.durationSec)} call
+              <h2 className="text-lg font-semibold text-slate-900">Listening for Vaani calls</h2>
+              <p className="mt-1 max-w-sm text-sm text-stone-500">
+                Nothing has arrived yet. Call the Aangan inbound number and the call will appear here within seconds.
               </p>
             </div>
-
-            <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-3.5 py-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800">
-                <UserCheck className="h-4 w-4" />
-              </div>
-              <div className="text-sm leading-tight">
-                <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500">
-                  {selected.assigned ? 'Assigned to' : 'Unassigned'}
-                </div>
-                <div className="font-semibold text-slate-900">
-                  {selected.assigned ? LEAD_DESIGNER.name : 'Not routed to a designer'}
-                </div>
-                {selected.assigned && <div className="text-xs text-stone-500">{LEAD_DESIGNER.role}</div>}
-              </div>
-            </div>
-          </header>
-
-          {/* Audio player */}
-          <section className="mt-5 rounded-2xl bg-slate-900 p-4 text-slate-100 shadow-sm">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={togglePlay}
-                aria-label={playing ? 'Pause recording' : 'Play recording'}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-400 text-slate-900 transition hover:bg-amber-300"
-              >
-                {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5 translate-x-[1px]" />}
-              </button>
-              <div className="min-w-0 flex-1">
-                <div className="mb-1.5 flex items-center justify-between text-xs text-slate-400">
-                  <span>Call recording</span>
-                  <span className="tabular-nums">
-                    {formatClock(position)} / {formatClock(selected.durationSec)}
-                  </span>
-                </div>
-                <div className="relative h-5">
-                  <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-slate-700">
-                    <div className="h-full rounded-full bg-amber-400" style={{ width: `${pct}%` }} />
+          ) : (
+            <>
+              <header className="flex flex-wrap items-start justify-between gap-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-xl font-semibold text-slate-900">{selected.caller}</h2>
+                    <StatusTag ended={selected.ended} />
+                    {isAfterHours(selected.startedAt) && <AfterHoursTag />}
                   </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={selected.durationSec}
-                    value={position}
-                    onChange={(e) => setPosition(Number(e.target.value))}
-                    aria-label="Seek recording"
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                  />
-                  <div
-                    className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-slate-900 bg-amber-300"
-                    style={{ left: `${pct}%` }}
-                  />
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 text-sm text-stone-500">
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5" />
+                      {fmtDate(selected.startedAt)}, {fmtTime(selected.startedAt)} IST
+                    </span>
+                    {selected.agent && (
+                      <span className="inline-flex items-center gap-1">
+                        <PhoneIncoming className="h-3.5 w-3.5" />
+                        {selected.agent}
+                        {selected.callType ? ` · ${selected.callType}` : ''}
+                      </span>
+                    )}
+                    {selected.to && <span>to {selected.to}</span>}
+                  </p>
                 </div>
-              </div>
-            </div>
-          </section>
+                <div className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-3.5 py-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-800">
+                    <UserCheck className="h-4 w-4" />
+                  </div>
+                  <div className="text-sm leading-tight">
+                    <div className="text-[11px] font-medium uppercase tracking-wide text-stone-500">Lead designer</div>
+                    <div className="font-semibold text-slate-900">{LEAD_DESIGNER.name}</div>
+                  </div>
+                </div>
+              </header>
 
-          {/* Two-column layout */}
-          <div className="mt-5 grid gap-5 lg:grid-cols-2">
-            {/* Left: Dossier */}
-            <div className="space-y-5">
-              {selected.cutApplied && (
-                <div className="rounded-2xl border border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-600 text-white">
-                      <ShieldCheck className="h-5 w-5" />
+              <div className="mt-5 space-y-4">
+                {selected.summary ? (
+                  <section className="rounded-2xl border border-stone-200 bg-white p-4">
+                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                      <Sparkles className="h-4 w-4 text-amber-700" /> Call Summary
                     </div>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-sm font-semibold text-amber-900">The Cut · Guardrail held</h3>
-                        <span className="rounded-full bg-amber-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                          No binding price quoted
-                        </span>
-                      </div>
-                      <p className="mt-1 text-sm leading-relaxed text-amber-900/80">{selected.cutNote}</p>
-                      <p className="mt-2 text-xs text-amber-800/70">
-                        Studio policy: pricing is indicative only and requires site measurement.
-                      </p>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{selected.summary}</p>
+                  </section>
+                ) : (
+                  <Pending
+                    icon={<Sparkles className="h-4 w-4" />}
+                    title="Call Summary & Lead Dossier"
+                    text="Not received from Vaani yet. Property type, area, budget and location will appear once an end-of-call event arrives."
+                  />
+                )}
+
+                {selected.transcript ? (
+                  <section className="rounded-2xl border border-stone-200 bg-white p-4">
+                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                      <FileText className="h-4 w-4 text-amber-700" /> Transcript
                     </div>
+                    <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{selected.transcript}</pre>
+                  </section>
+                ) : (
+                  <Pending
+                    icon={<FileText className="h-4 w-4" />}
+                    title="Transcript"
+                    text="Not received from Vaani yet."
+                  />
+                )}
+
+                <section className="rounded-2xl border border-stone-200 bg-white p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-slate-900">Events received from Vaani</h3>
+                    <span className="text-xs text-stone-500">{selected.events.length} event{selected.events.length === 1 ? '' : 's'}</span>
                   </div>
-                </div>
-              )}
-
-              <section className="rounded-2xl border border-stone-200 bg-white p-4">
-                <div className="mb-3 flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-amber-700" />
-                  <h3 className="text-sm font-semibold text-slate-900">AI Context Summary</h3>
-                </div>
-                <p className="text-sm leading-relaxed text-slate-700">{selected.summary}</p>
-                <p className="mt-3 flex items-center gap-1.5 text-xs text-stone-500">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Already covered on the call. No need to re-ask these on your first touch.
-                </p>
-              </section>
-
-              <section>
-                <h3 className="mb-2.5 text-sm font-semibold text-slate-900">Lead Dossier</h3>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <EntityCard icon={<Home className="h-3.5 w-3.5" />} label="Property Type & Scope" value={`${selected.entities.propertyType} · ${selected.entities.scope}`} />
-                  <EntityCard icon={<Ruler className="h-3.5 w-3.5" />} label="Carpet Area" value={selected.entities.carpetArea} />
-                  <EntityCard icon={<IndianRupee className="h-3.5 w-3.5" />} label="Target Budget" value={selected.entities.budget} />
-                  <EntityCard icon={<MapPin className="h-3.5 w-3.5" />} label="Site Location" value={selected.entities.location} />
-                  <div className="sm:col-span-2">
-                    <EntityCard icon={<CalendarClock className="h-3.5 w-3.5" />} label="Possession / Timeline" value={selected.entities.timeline} />
-                  </div>
-                </div>
-              </section>
-            </div>
-
-            {/* Right: Transcript + Outputs */}
-            <div className="space-y-5">
-              <section className="rounded-2xl border border-stone-200 bg-white">
-                <div className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
-                  <h3 className="text-sm font-semibold text-slate-900">Call Transcript</h3>
-                  <span className="text-xs text-stone-500">Click a message to jump to it</span>
-                </div>
-                <div ref={transcriptRef} className="max-h-[420px] space-y-3 overflow-y-auto p-4">
-                  {selected.transcript.map((t) => {
-                    const agent = t.speaker === 'agent';
-                    const active = t.id === activeId;
-                    return (
-                      <div key={t.id} data-id={t.id} className={`flex gap-2.5 ${agent ? '' : 'flex-row-reverse'}`}>
-                        <div
-                          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
-                            agent ? 'bg-slate-900 text-amber-300' : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {agent ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
-                        </div>
-                        <button
-                          onClick={() => setPosition(t.at)}
-                          className={`max-w-[80%] rounded-2xl px-3.5 py-2.5 text-left text-sm leading-relaxed transition ${
-                            agent ? 'rounded-tl-sm bg-stone-100 text-slate-800' : 'rounded-tr-sm bg-amber-50 text-slate-800'
-                          } ${active ? 'ring-2 ring-amber-500' : 'ring-1 ring-transparent hover:ring-stone-300'}`}
-                        >
-                          <div className="mb-0.5 flex items-center gap-2 text-[11px] font-medium text-stone-500">
-                            <span>{agent ? 'Agent (Vaani)' : 'Caller'}</span>
-                            <span className="tabular-nums">{formatClock(t.at)}</span>
-                          </div>
-                          {t.text}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-stone-200 bg-white p-4">
-                <h3 className="mb-3 text-sm font-semibold text-slate-900">Automation Outputs</h3>
-                <ul className="space-y-2.5">
-                  {(Object.keys(OUTPUT_META) as OutputKey[]).map((key, i) => {
-                    const meta = OUTPUT_META[key];
-                    const out = selected.outputs[key];
-                    return (
-                      <li key={key} className="flex items-start gap-3 rounded-xl border border-stone-200 bg-stone-50/60 p-3">
-                        <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                            out.status === 'skipped' ? 'bg-stone-200 text-stone-500' : 'bg-slate-900 text-amber-300'
-                          }`}
-                        >
-                          {meta.icon}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center justify-between gap-x-3">
-                            <span className="text-sm font-semibold text-slate-900">
-                              {i + 1}. {meta.title}
-                            </span>
-                            <StatusPill status={out.status} />
-                          </div>
-                          <p className="break-words text-xs text-stone-500">{meta.sub}</p>
-                          <p className="mt-1 break-words text-xs text-slate-700">
-                            {out.detail}
-                            {out.syncedAt && <span className="text-stone-400"> · {out.syncedAt}</span>}
-                          </p>
-                          {key === 'hubspot' && selected.hubspot && out.status === 'delivered' && (
-                            <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                              <span className="rounded-md bg-white px-2 py-0.5 ring-1 ring-stone-200">Stage: {selected.hubspot.stage}</span>
-                              <span className="rounded-md bg-white px-2 py-0.5 ring-1 ring-stone-200">Pipeline: {selected.hubspot.pipelineValue}</span>
-                              <span className="rounded-md bg-white px-2 py-0.5 ring-1 ring-stone-200">{selected.hubspot.margin}</span>
-                            </div>
-                          )}
-                        </div>
+                  <ul className="space-y-2">
+                    {selected.events.map((e) => (
+                      <li key={e.id} className="rounded-xl border border-stone-200 bg-stone-50/60">
+                        <details>
+                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                            <span className="font-mono text-xs font-semibold text-slate-900">{e.event_type ?? 'unknown'}</span>
+                            <span className="text-xs text-stone-500">{fmtTime(new Date(e.received_at))}</span>
+                          </summary>
+                          <pre className="overflow-auto border-t border-stone-200 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+                            {JSON.stringify(e.payload, null, 2)}
+                          </pre>
+                        </details>
                       </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            </div>
-          </div>
+                    ))}
+                  </ul>
+                </section>
+              </div>
+            </>
+          )}
         </div>
-
       </main>
     </div>
   );
