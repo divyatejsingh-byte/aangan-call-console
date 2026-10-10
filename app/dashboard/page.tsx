@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Phone, Search, Moon, Clock, UserCheck, CalendarDays, ChevronDown, LogOut,
   Radio, RefreshCw, Inbox, FileText, Sparkles, PhoneIncoming, CheckCircle2, CircleDashed,
-  Bot, User, Home, MapPin, IndianRupee, CalendarClock, Target, Timer, ExternalLink, CalendarCheck,
+  Bot, User, Home, MapPin, IndianRupee, CalendarClock, Target, Timer, ExternalLink, CalendarCheck, Database,
 } from 'lucide-react';
 
 /* ----------------------------- Types ----------------------------- */
@@ -45,6 +45,7 @@ interface CallRecord {
   recordingUrl: string | null;
   quality: Record<string, number> | null;
   appointment: string | null;
+  hubspot: { status: string; dealId?: string; note?: string } | null;
 }
 
 interface TranscriptLine {
@@ -117,6 +118,8 @@ function groupCalls(events: WebhookEvent[]): CallRecord[] {
         recordingUrl: str(post.recording_url) || null,
         quality: q && typeof q === 'object' ? (q as Record<string, number>) : null,
         appointment: str(entities['Appointment Schedule']) || null,
+        hubspot:
+          (evts.find((e) => e.event_type === 'call_postprocessing')?.payload._hubspot as CallRecord['hubspot']) ?? null,
       };
     })
     .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
@@ -465,6 +468,29 @@ export default function CallConsolePage() {
                         <div className="text-sm font-semibold text-emerald-900">Discovery call requested</div>
                         <div className="text-sm text-emerald-900/80">{selected.appointment}</div>
                         <div className="mt-1 text-xs text-emerald-900/60">Agreed on the call. Not yet added to a calendar.</div>
+                      </div>
+                    </section>
+                  )}
+
+                  {selected.hubspot && (
+                    <section className="flex items-start gap-3 rounded-2xl border border-stone-200 bg-white p-4">
+                      <Database className="mt-0.5 h-5 w-5 text-amber-700" />
+                      <div className="min-w-0 text-sm">
+                        <div className="font-semibold text-slate-900">HubSpot CRM</div>
+                        {(selected.hubspot.status === 'created' || selected.hubspot.status === 'exists') && selected.hubspot.dealId ? (
+                          <a
+                            href={`https://app-na2.hubspot.com/contacts/247652924/record/0-3/${selected.hubspot.dealId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-emerald-700 underline"
+                          >
+                            Deal in Initial Inquiry <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : selected.hubspot.status === 'skipped' ? (
+                          <div className="text-stone-500">Not pushed: {selected.hubspot.note}</div>
+                        ) : (
+                          <div className="text-rose-700">Push failed: {selected.hubspot.note}</div>
+                        )}
                       </div>
                     </section>
                   )}

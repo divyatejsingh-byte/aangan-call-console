@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { timingSafeEqual } from 'crypto';
 import { supabaseAdmin } from '@/lib/supabase-admin';
+import { pushCallToHubspot } from '@/lib/hubspot';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,13 +37,27 @@ export async function POST(req: NextRequest) {
     if (v) headers[k] = v;
   }
 
-  const { error } = await supabaseAdmin()
+  const db = supabaseAdmin();
+  const { data: row, error } = await db
     .from('webhook_events')
-    .insert({ event_type: eventType, payload, headers });
+    .insert({ event_type: eventType, payload, headers })
+    .select('id')
+    .single();
 
-  if (error) {
-    console.error('webhook insert failed', error.message);
+  if (error || !row) {
+    console.error('webhook insert failed', error?.message);
     return NextResponse.json({ error: 'storage failed' }, { status: 500 });
+  }
+
+  // A finished call: create the HubSpot deal. A HubSpot failure must not make Vaani retry the webhook.
+  if (eventType === 'call_postprocessing' && obj.data && typeof obj.data === 'object') {
+    const hubspot = await pushCallToHubspot(obj.data as Record<string, unknown>);
+    if (hubspot.status === 'error') console.error('hubspot push failed', hubspot.note);
+    const { error: updateError } = await db
+      .from('webhook_events')
+      .update({ payload: { ...obj, _hubspot: hubspot } })
+      .eq('id', row.id);
+    if (updateError) console.error('could not record hubspot result', updateError.message);
   }
   return NextResponse.json({ ok: true });
 }
