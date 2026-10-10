@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   Phone, Search, Moon, Clock, UserCheck, CalendarDays, ChevronDown, LogOut,
   Radio, RefreshCw, Inbox, FileText, Sparkles, PhoneIncoming, CheckCircle2, CircleDashed,
+  Bot, User, Home, MapPin, IndianRupee, CalendarClock, Target, Timer, ExternalLink, CalendarCheck,
 } from 'lucide-react';
 
 /* ----------------------------- Types ----------------------------- */
@@ -37,8 +38,19 @@ interface CallRecord {
   startedAt: Date;
   events: WebhookEvent[]; // oldest first
   ended: boolean;
-  transcript: string | null;
   summary: string | null;
+  transcript: TranscriptLine[];
+  durationSec: number | null;
+  entities: Record<string, unknown>;
+  recordingUrl: string | null;
+  quality: Record<string, number> | null;
+  appointment: string | null;
+}
+
+interface TranscriptLine {
+  time: string;
+  speaker: 'agent' | 'user';
+  text: string;
 }
 
 /* ---------------------------- Constants -------------------------- */
@@ -57,26 +69,14 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
 
-// Look for a field anywhere in an event payload (Vaani's end-of-call format isn't confirmed yet).
-function findField(obj: unknown, names: string[], depth = 0): unknown {
-  if (!obj || typeof obj !== 'object' || depth > 4) return undefined;
-  const rec = obj as Record<string, unknown>;
-  for (const n of names) if (rec[n] !== undefined && rec[n] !== null && rec[n] !== '') return rec[n];
-  for (const v of Object.values(rec)) {
-    const found = findField(v, names, depth + 1);
-    if (found !== undefined) return found;
+function parseTranscript(raw: string): TranscriptLine[] {
+  const lines: TranscriptLine[] = [];
+  for (const row of raw.split('\n')) {
+    const m = row.match(/^\[(\d{1,2}:\d{2}:\d{2})\]\s*(AGENT|USER):\s*(.*)$/i);
+    if (m) lines.push({ time: m[1], speaker: m[2].toUpperCase() === 'AGENT' ? 'agent' : 'user', text: m[3] });
+    else if (row.trim() && lines.length) lines[lines.length - 1].text += ' ' + row.trim();
   }
-  return undefined;
-}
-
-function asText(v: unknown): string | null {
-  if (v === undefined || v === null) return null;
-  if (typeof v === 'string') return v;
-  try {
-    return JSON.stringify(v, null, 2);
-  } catch {
-    return null;
-  }
+  return lines;
 }
 
 function groupCalls(events: WebhookEvent[]): CallRecord[] {
@@ -91,24 +91,52 @@ function groupCalls(events: WebhookEvent[]): CallRecord[] {
     .map(([id, list]) => {
       const evts = [...list].sort((a, b) => a.received_at.localeCompare(b.received_at));
       const first = evts[0];
-      const data = first.payload.data ?? {};
-      const ts = new Date(str(first.payload.timestamp) || first.received_at);
-      const transcript = asText(evts.map((e) => findField(e.payload.data, ['transcript', 'transcription', 'conversation'])).find((v) => v !== undefined));
-      const summary = asText(evts.map((e) => findField(e.payload.data, ['summary', 'call_summary'])).find((v) => v !== undefined));
+      const started = (first.payload.data ?? {}) as Record<string, unknown>;
+      const post = (evts.find((e) => e.event_type === 'call_postprocessing')?.payload.data ?? {}) as Record<string, unknown>;
+      const end = (evts.find((e) => e.event_type === 'call_ended')?.payload.data ?? {}) as Record<string, unknown>;
+
+      const ts = new Date(str(post.call_started_at) || str(first.payload.timestamp) || first.received_at);
+      const rawTranscript = str(post.transcript) || str(end.transcript);
+      const entities = (post.entities && typeof post.entities === 'object' ? post.entities : {}) as Record<string, unknown>;
+      const duration = Number(post.call_duration ?? end.call_duration);
+      const q = post.conversation_quality;
+
       return {
         id,
-        caller: str(data.caller) || str(first.payload.from) || 'Unknown caller',
+        caller: str(started.caller) || str(first.payload.from) || 'Unknown caller',
         to: str(first.payload.to),
-        agent: str(data.agent_name),
-        callType: str(data.call_type),
+        agent: str(started.agent_name),
+        callType: str(started.call_type),
         startedAt: isNaN(ts.getTime()) ? new Date(first.received_at) : ts,
         events: evts,
-        ended: evts.some((e) => /end|complet|finish|hangup/i.test(e.event_type ?? '')),
-        transcript,
-        summary,
+        ended: evts.some((e) => /end|complet|finish|hangup|postprocess/i.test(e.event_type ?? '')),
+        summary: str(post.summary) || null,
+        transcript: parseTranscript(rawTranscript),
+        durationSec: Number.isFinite(duration) && duration > 0 ? duration : null,
+        entities,
+        recordingUrl: str(post.recording_url) || null,
+        quality: q && typeof q === 'object' ? (q as Record<string, number>) : null,
+        appointment: str(entities['Appointment Schedule']) || null,
       };
     })
     .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
+}
+
+function fmtDuration(sec: number) {
+  const s = Math.round(sec);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function fmtValue(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if ('min' in o || 'max' in o) return [o.min, o.max].filter((x) => x !== null && x !== undefined).join(' – ');
+    return Object.values(o).filter(Boolean).join(', ');
+  }
+  return '';
 }
 
 const IST = 'Asia/Kolkata';
@@ -148,7 +176,7 @@ function StatusTag({ ended }: { ended: boolean }) {
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
-      <CircleDashed className="h-3 w-3" /> Started · awaiting end-of-call data
+      <CircleDashed className="h-3 w-3" /> In progress or no end event
     </span>
   );
 }
@@ -292,13 +320,18 @@ export default function CallConsolePage() {
                   }`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-slate-900">{c.caller}</span>
+                    <span className="truncate text-sm font-semibold text-slate-900">{c.caller === 'web-user' ? 'Web test call' : c.caller}</span>
                     <span className="shrink-0 text-xs text-stone-500">
                       {fmtDate(c.startedAt)}, {fmtTime(c.startedAt)}
                     </span>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <StatusTag ended={c.ended} />
+                    {c.appointment && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200">
+                        <CalendarCheck className="h-3 w-3" /> Discovery call
+                      </span>
+                    )}
                     {isAfterHours(c.startedAt) && <AfterHoursTag />}
                   </div>
                 </button>
@@ -355,7 +388,7 @@ export default function CallConsolePage() {
 
       {/* --------------------------- Main -------------------------- */}
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl p-4 md:p-6">
+        <div className="mx-auto max-w-6xl p-4 md:p-6">
           {loadError && (
             <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">{loadError}</div>
           )}
@@ -375,7 +408,7 @@ export default function CallConsolePage() {
               <header className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-xl font-semibold text-slate-900">{selected.caller}</h2>
+                    <h2 className="text-xl font-semibold text-slate-900">{selected.caller === 'web-user' ? 'Web test call' : selected.caller}</h2>
                     <StatusTag ended={selected.ended} />
                     {isAfterHours(selected.startedAt) && <AfterHoursTag />}
                   </div>
@@ -384,6 +417,12 @@ export default function CallConsolePage() {
                       <Clock className="h-3.5 w-3.5" />
                       {fmtDate(selected.startedAt)}, {fmtTime(selected.startedAt)} IST
                     </span>
+                    {selected.durationSec && (
+                      <span className="inline-flex items-center gap-1">
+                        <Timer className="h-3.5 w-3.5" />
+                        {fmtDuration(selected.durationSec)}
+                      </span>
+                    )}
                     {selected.agent && (
                       <span className="inline-flex items-center gap-1">
                         <PhoneIncoming className="h-3.5 w-3.5" />
@@ -405,58 +444,138 @@ export default function CallConsolePage() {
                 </div>
               </header>
 
-              <div className="mt-5 space-y-4">
-                {selected.summary ? (
-                  <section className="rounded-2xl border border-stone-200 bg-white p-4">
-                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                      <Sparkles className="h-4 w-4 text-amber-700" /> Call Summary
-                    </div>
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{selected.summary}</p>
-                  </section>
-                ) : (
-                  <Pending
-                    icon={<Sparkles className="h-4 w-4" />}
-                    title="Call Summary & Lead Dossier"
-                    text="Not received from Vaani yet. Property type, area, budget and location will appear once an end-of-call event arrives."
-                  />
-                )}
-
-                {selected.transcript ? (
-                  <section className="rounded-2xl border border-stone-200 bg-white p-4">
-                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                      <FileText className="h-4 w-4 text-amber-700" /> Transcript
-                    </div>
-                    <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700">{selected.transcript}</pre>
-                  </section>
-                ) : (
-                  <Pending
-                    icon={<FileText className="h-4 w-4" />}
-                    title="Transcript"
-                    text="Not received from Vaani yet."
-                  />
-                )}
-
-                <section className="rounded-2xl border border-stone-200 bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-slate-900">Events received from Vaani</h3>
-                    <span className="text-xs text-stone-500">{selected.events.length} event{selected.events.length === 1 ? '' : 's'}</span>
+              {selected.recordingUrl && (
+                <section className="mt-5 rounded-2xl bg-slate-900 p-4 text-slate-100">
+                  <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
+                    <span>Call recording</span>
+                    <a href={selected.recordingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-amber-300 hover:text-amber-200">
+                      Open <ExternalLink className="h-3 w-3" />
+                    </a>
                   </div>
-                  <ul className="space-y-2">
-                    {selected.events.map((e) => (
-                      <li key={e.id} className="rounded-xl border border-stone-200 bg-stone-50/60">
-                        <details>
-                          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm">
-                            <span className="font-mono text-xs font-semibold text-slate-900">{e.event_type ?? 'unknown'}</span>
-                            <span className="text-xs text-stone-500">{fmtTime(new Date(e.received_at))}</span>
-                          </summary>
-                          <pre className="overflow-auto border-t border-stone-200 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
-                            {JSON.stringify(e.payload, null, 2)}
-                          </pre>
-                        </details>
-                      </li>
-                    ))}
-                  </ul>
+                  <audio controls preload="none" src={selected.recordingUrl} className="h-10 w-full" />
                 </section>
+              )}
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div className="space-y-4">
+                  {selected.appointment && (
+                    <section className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                      <CalendarCheck className="mt-0.5 h-5 w-5 text-emerald-700" />
+                      <div>
+                        <div className="text-sm font-semibold text-emerald-900">Discovery call requested</div>
+                        <div className="text-sm text-emerald-900/80">{selected.appointment}</div>
+                        <div className="mt-1 text-xs text-emerald-900/60">Agreed on the call. Not yet added to a calendar.</div>
+                      </div>
+                    </section>
+                  )}
+
+                  {selected.summary ? (
+                    <section className="rounded-2xl border border-stone-200 bg-white p-4">
+                      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <Sparkles className="h-4 w-4 text-amber-700" /> AI Context Summary
+                      </div>
+                      <p className="text-sm leading-relaxed text-slate-700">{selected.summary}</p>
+                    </section>
+                  ) : (
+                    <Pending icon={<Sparkles className="h-4 w-4" />} title="AI Context Summary" text="Not received from Vaani yet. It arrives a minute or two after the call ends." />
+                  )}
+
+                  <section>
+                    <h3 className="mb-2.5 text-sm font-semibold text-slate-900">Lead Dossier</h3>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {[
+                        { key: 'Property Type & Configuration', label: 'Property Type', icon: <Home className="h-3.5 w-3.5" /> },
+                        { key: 'Budget Range', label: 'Target Budget', icon: <IndianRupee className="h-3.5 w-3.5" /> },
+                        { key: 'Location Preference', label: 'Site Location', icon: <MapPin className="h-3.5 w-3.5" /> },
+                        { key: 'Timeline', label: 'Timeline', icon: <CalendarClock className="h-3.5 w-3.5" /> },
+                        { key: 'Market Status', label: 'Buyer Status', icon: <Target className="h-3.5 w-3.5" /> },
+                        { key: 'End-Use Purpose', label: 'Use', icon: <Home className="h-3.5 w-3.5" /> },
+                      ].map((f) => {
+                        const v = fmtValue(selected.entities[f.key]);
+                        return (
+                          <div key={f.key} className="rounded-xl border border-stone-200 bg-white p-3.5">
+                            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-stone-500">
+                              <span className="text-amber-700">{f.icon}</span>
+                              {f.label}
+                            </div>
+                            <div className={`text-sm leading-snug ${v ? 'font-semibold text-slate-900' : 'text-stone-400'}`}>
+                              {v || 'Not captured'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  {selected.quality && (
+                    <section className="rounded-2xl border border-stone-200 bg-white p-4">
+                      <h3 className="mb-2.5 text-sm font-semibold text-slate-900">Conversation quality</h3>
+                      <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+                        {Object.entries(selected.quality).map(([k, v]) => (
+                          <div key={k} className="flex items-center justify-between">
+                            <dt className="capitalize text-stone-500">{k.replace(/_/g, ' ')}</dt>
+                            <dd className="font-semibold text-slate-900">{v}/10</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </section>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <section className="rounded-2xl border border-stone-200 bg-white">
+                    <div className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
+                      <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <FileText className="h-4 w-4 text-amber-700" /> Call Transcript
+                      </h3>
+                    </div>
+                    {selected.transcript.length === 0 ? (
+                      <p className="p-4 text-sm text-stone-500">Not received from Vaani yet.</p>
+                    ) : (
+                      <div className="max-h-[480px] space-y-3 overflow-y-auto p-4">
+                        {selected.transcript.map((t, i) => {
+                          const agent = t.speaker === 'agent';
+                          return (
+                            <div key={i} className={`flex gap-2.5 ${agent ? '' : 'flex-row-reverse'}`}>
+                              <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${agent ? 'bg-slate-900 text-amber-300' : 'bg-amber-100 text-amber-800'}`}>
+                                {agent ? <Bot className="h-4 w-4" /> : <User className="h-4 w-4" />}
+                              </div>
+                              <div className={`max-w-[82%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${agent ? 'rounded-tl-sm bg-stone-100' : 'rounded-tr-sm bg-amber-50'}`}>
+                                <div className="mb-0.5 flex items-center gap-2 text-[11px] font-medium text-stone-500">
+                                  <span>{agent ? 'Agent (Vaani)' : 'Caller'}</span>
+                                  <span className="tabular-nums">{t.time}</span>
+                                </div>
+                                {t.text}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="rounded-2xl border border-stone-200 bg-white p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-slate-900">Events received from Vaani</h3>
+                      <span className="text-xs text-stone-500">{selected.events.length} event{selected.events.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <ul className="space-y-2">
+                      {selected.events.map((e) => (
+                        <li key={e.id} className="rounded-xl border border-stone-200 bg-stone-50/60">
+                          <details>
+                            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm">
+                              <span className="font-mono text-xs font-semibold text-slate-900">{e.event_type ?? 'unknown'}</span>
+                              <span className="text-xs text-stone-500">{fmtTime(new Date(e.received_at))}</span>
+                            </summary>
+                            <pre className="max-h-64 overflow-auto border-t border-stone-200 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+                              {JSON.stringify(e.payload, null, 2)}
+                            </pre>
+                          </details>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                </div>
               </div>
             </>
           )}
